@@ -1100,10 +1100,33 @@ def _mutate_engines(build: Callable[[dict], dict], *, restart: bool) -> dict:
 
 
 def _restart_for_engines() -> None:
+    restarted = False
     try:
-        bootstrap.refresh_local_runtime()
+        restarted = bool(bootstrap.refresh_local_runtime())
     except Exception:
         logger.debug("post-engine-edit runtime restart failed", exc_info=True)
+    _announce_engine_change(restarted)
+
+
+def _announce_engine_change(restarted: bool) -> None:
+    """Re-broadcast ``setup.ready`` after an engine registry mutation.
+
+    The dashboard's status surfaces (the desktop's bottom-left backend
+    indicator above all) refresh their verdict from ``setup.status`` +
+    ``setup.runtime_check`` only when a ``setup.ready`` event lands. A
+    silent runtime bounce would leave every open client painting the
+    previous engine's verdict until the next ambient tick; this announce
+    makes an engine switch visible immediately, including the failure
+    case (``runtime_restarted: false`` means the bounce itself errored).
+    """
+    try:
+        from tui_gateway.server import _broadcast_global_event
+
+        from hermes_cli.free_tier_bootstrap import SETUP_READY_EVENT
+        _broadcast_global_event(SETUP_READY_EVENT, {
+            "reason": "engine_mutation", "runtime_restarted": restarted})
+    except Exception:
+        logger.debug("engine-change announce failed", exc_info=True)
 
 
 @router.get("/api/local-models/engines")
